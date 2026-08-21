@@ -1,0 +1,19 @@
+# Build output
+bin/
+obj/
+
+# Visual Studio
+.vs/
+*.user
+
+# Installer build output (the .iss script and build-release.ps1 are tracked; the generated
+# installer exe is a build artifact, not source)
+Installer/Output/
+
+# Rider / VS Code
+.idea/
+*.suo
+
+# OS cruft
+Thumbs.db
+.DS_Store

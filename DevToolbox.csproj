@@ -1,0 +1,61 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net472</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <AssemblyName>DevToolbox</AssemblyName>
+    <AssemblyTitle>DevToolbox</AssemblyTitle>
+    <Product>DevToolbox</Product>
+    <ApplicationIcon>Assets\AppIcon.ico</ApplicationIcon>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Same single-exe packaging approach as SPDummyDataGenerator, so this tool can be
+         handed out/copied around as one file with no loose DLLs. -->
+    <PackageReference Include="Costura.Fody" Version="6.2.0">
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+    <PackageReference Include="YamlDotNet" Version="16.2.1" />
+    <PackageReference Include="NUglify" Version="1.21.9" />
+    <PackageReference Include="QRCoder" Version="1.6.0" />
+    <PackageReference Include="HtmlAgilityPack" Version="1.11.63" />
+    <PackageReference Include="Markdig" Version="0.37.0" />
+    <!-- PDF read/write for the PDF Password Remover and Word<->PDF converters - modern empira
+         PDFsharp 6.x (netstandard2.0), not the old 1.50 line, since 6.2+ is the first release
+         that can read revision-5 (AES-256-ish) encrypted PDFs, not just classic RC4/AES-128. -->
+    <PackageReference Include="PdfSharp" Version="6.2.4" />
+    <!-- Text extraction for PDF -> Word - Apache-2.0, netstandard2.0/net462+ compatible. -->
+    <PackageReference Include="PdfPig" Version="0.1.15" />
+    <!-- .docx reading (Word -> PDF) and writing (PDF -> Word) - Microsoft's official Open XML SDK. -->
+    <PackageReference Include="DocumentFormat.OpenXml" Version="3.5.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- System.Security.Cryptography.ProtectedData (DPAPI) lives in this framework assembly and
+         isn't part of the SDK's default implicit references - needed for the Password
+         Generator's encrypted-at-rest history. -->
+    <Reference Include="System.Security" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Embedded (not copied loose) so the nav category icons travel inside the single exe like
+         everything else - loaded at runtime via GetManifestResourceStream. -->
+    <EmbeddedResource Include="Assets\SharePoint.png" />
+    <EmbeddedResource Include="Assets\Formatters.png" />
+    <EmbeddedResource Include="Assets\Validators.png" />
+    <EmbeddedResource Include="Assets\Converters.png" />
+    <EmbeddedResource Include="Assets\EncodersCryptography.png" />
+    <EmbeddedResource Include="Assets\CodeMinifiersBeautifier.png" />
+    <EmbeddedResource Include="Assets\StringEscaperUtilities.png" />
+    <EmbeddedResource Include="Assets\WebResources.png" />
+    <EmbeddedResource Include="Assets\PdfTools.png" />
+    <EmbeddedResource Include="Assets\CodeRunner.png" />
+  </ItemGroup>
+
+</Project>
