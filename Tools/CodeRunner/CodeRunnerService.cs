@@ -254,7 +254,7 @@ namespace DevToolbox.Tools.CodeRunner
                     RedirectStandardError = true,
                     CreateNoWindow = true
                 };
-                psi.Arguments = BuildArguments(args);
+                foreach (var arg in args) psi.ArgumentList.Add(arg);
 
                 using var process = Process.Start(psi);
                 if (process is null) return false;
@@ -270,7 +270,7 @@ namespace DevToolbox.Tools.CodeRunner
                 var exited = process.WaitForExit(5000);
                 if (!exited)
                 {
-                    try { process.Kill(); } catch (Exception) { /* best-effort cleanup of a stuck probe */ }
+                    try { process.Kill(entireProcessTree: true); } catch (Exception) { /* best-effort cleanup of a stuck probe */ }
                     return false;
                 }
                 return true;
@@ -322,7 +322,7 @@ namespace DevToolbox.Tools.CodeRunner
                 var scriptPath = Path.Combine(tempDir, "script" + language.FileExtension);
                 WriteScript(scriptPath, code);
 
-                var arguments = BuildArguments(language.BuildRunArguments!(scriptPath));
+                var arguments = language.BuildRunArguments!(scriptPath);
                 var (stdout, stderr, exitCode, timedOut) = ExecuteProcess(executable, arguments, tempDir, timeoutSeconds);
                 return new RunResult(stdout, stderr, exitCode, timedOut);
             }
@@ -350,7 +350,7 @@ namespace DevToolbox.Tools.CodeRunner
                 var exePath = Path.Combine(tempDir, "script.exe");
                 WriteScript(sourcePath, code);
 
-                var compileArguments = BuildArguments(language.BuildCompileArguments!(sourcePath, exePath));
+                var compileArguments = language.BuildCompileArguments!(sourcePath, exePath);
                 var (buildStdout, buildStderr, buildExitCode, buildTimedOut) =
                     ExecuteProcess(compiler, compileArguments, tempDir, CompileTimeoutSeconds);
 
@@ -369,7 +369,7 @@ namespace DevToolbox.Tools.CodeRunner
 
                 // Build succeeded - run the produced .exe as its own phase, using the exact same
                 // timed/captured execution as an Interpreted language would.
-                var (stdout, stderr2, exitCode, timedOut) = ExecuteProcess(exePath, string.Empty, tempDir, timeoutSeconds);
+                var (stdout, stderr2, exitCode, timedOut) = ExecuteProcess(exePath, Array.Empty<string>(), tempDir, timeoutSeconds);
                 return new RunResult(stdout, stderr2, exitCode, timedOut,
                     BuildStdout: buildStdout, BuildStderr: buildStderr, BuildFailed: false, BuildExitCode: buildExitCode);
             }
@@ -408,8 +408,10 @@ namespace DevToolbox.Tools.CodeRunner
         }
 
         /// <summary>
-        /// Starts <paramref name="executable"/> with the given pre-escaped argument string,
-        /// redirecting and asynchronously draining both stdout and stderr, and enforces
+        /// Starts <paramref name="executable"/> with the given individual argument values (via
+        /// ProcessStartInfo.ArgumentList, which handles all the Windows quoting/escaping rules
+        /// itself - no manual escaping needed), redirecting and asynchronously draining both
+        /// stdout and stderr, and enforces
         /// <paramref name="timeoutSeconds"/>. The single shared execution core for every process
         /// this tool runs for real (probing aside): an Interpreted language's script, a Compiled
         /// language's compiler invocation, and a Compiled language's resulting .exe all go through
@@ -421,13 +423,12 @@ namespace DevToolbox.Tools.CodeRunner
         /// writes enough output to fill the OS pipe buffer before it exits, because nothing is
         /// draining that buffer for it to keep writing into.
         ///
-        /// LIMITATION: net472's System.Diagnostics.Process has no
-        /// Kill(bool entireProcessTree) overload - that was added in .NET Core 3.0+ and isn't
-        /// available on .NET Framework. Only the parameterless Kill() is available here, which
-        /// terminates just this one process. If a timed-out script/compiler/program spawned child
-        /// processes of its own, those children are NOT guaranteed to die when Kill() returns -
-        /// they can keep running after this method returns TimedOut=true. This is a known, honest
-        /// limitation of running on net472, not something silently swept under the rug.
+        /// Kill(entireProcessTree: true) terminates this process AND every child process it
+        /// spawned (e.g. a PowerShell script that shells out to something else, or Node
+        /// launching a subprocess) - this overload only exists on modern .NET (added in .NET
+        /// Core 3.0+, never available on the .NET Framework 4.7.2 this app originally targeted;
+        /// back then only the parameterless Kill() existed, which left orphaned children running
+        /// after a timeout - now fixed as a direct benefit of the net10.0 migration).
         ///
         /// Captured stdout/stderr is run through StripAnsi before being returned - NO_COLOR (set
         /// below) stops most well-behaved tools from emitting ANSI color codes in the first place,
@@ -437,17 +438,17 @@ namespace DevToolbox.Tools.CodeRunner
         /// what this tool displays.
         /// </summary>
         private static (string Stdout, string Stderr, int? ExitCode, bool TimedOut) ExecuteProcess(
-            string executable, string arguments, string workingDirectory, int timeoutSeconds)
+            string executable, IReadOnlyList<string> arguments, string workingDirectory, int timeoutSeconds)
         {
             var psi = new ProcessStartInfo(executable)
             {
-                Arguments = arguments,
                 UseShellExecute = false,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 CreateNoWindow = true,
                 WorkingDirectory = workingDirectory
             };
+            foreach (var arg in arguments) psi.ArgumentList.Add(arg);
 
             // PowerShell 7's $PSStyle colorizes error records with raw ANSI escape sequences even
             // when stderr is redirected (not just when writing to a real interactive terminal) -
@@ -474,7 +475,7 @@ namespace DevToolbox.Tools.CodeRunner
             var exited = process.WaitForExit(Math.Max(1, timeoutSeconds) * 1000);
             if (!exited)
             {
-                try { process.Kill(); }
+                try { process.Kill(entireProcessTree: true); }
                 catch (Exception) { /* may have exited in the tiny window between WaitForExit timing out and here */ }
 
                 // Give the kill a moment to flush whatever partial output was already buffered
@@ -520,77 +521,5 @@ namespace DevToolbox.Tools.CodeRunner
         private static readonly Regex AnsiEscapeSequence = new("\u001B\\[[0-9;]*[a-zA-Z]", RegexOptions.Compiled);
 
         private static string StripAnsi(string text) => string.IsNullOrEmpty(text) ? text : AnsiEscapeSequence.Replace(text, string.Empty);
-
-        /// <summary>
-        /// Builds a single Windows command-line argument string from individual argument values,
-        /// replicating the exact quoting/escaping algorithm .NET's own
-        /// ProcessStartInfo.ArgumentList uses internally on Windows (the CommandLineToArgvW-
-        /// compatible rules: backslashes are literal except when they precede a quote, in which
-        /// case N backslashes + a quote becomes 2N (or 2N+1) backslashes + an escaped/literal
-        /// quote). net472's ProcessStartInfo has no ArgumentList property at all (introduced in
-        /// .NET Core 2.1, never backported to .NET Framework), so this manual equivalent is what
-        /// keeps a temp file path or user-controlled argument value from being able to break out
-        /// of its own argument via embedded quotes/spaces/backslashes.
-        /// </summary>
-        private static string BuildArguments(IReadOnlyList<string> args)
-        {
-            var sb = new StringBuilder();
-            foreach (var argument in args) AppendArgument(sb, argument);
-            return sb.ToString();
-        }
-
-        private static void AppendArgument(StringBuilder sb, string argument)
-        {
-            if (sb.Length != 0) sb.Append(' ');
-
-            if (argument.Length != 0 && argument.IndexOfAny(new[] { ' ', '\t', '\n', '\v', '"' }) < 0)
-            {
-                sb.Append(argument);
-                return;
-            }
-
-            sb.Append('"');
-            var idx = 0;
-            while (idx < argument.Length)
-            {
-                var c = argument[idx++];
-                if (c == '\\')
-                {
-                    var numBackslash = 1;
-                    while (idx < argument.Length && argument[idx] == '\\')
-                    {
-                        idx++;
-                        numBackslash++;
-                    }
-
-                    if (idx == argument.Length)
-                    {
-                        // Will be immediately followed by the closing quote this method appends -
-                        // double the backslashes so that quote isn't swallowed as an escape.
-                        sb.Append('\\', numBackslash * 2);
-                    }
-                    else if (argument[idx] == '"')
-                    {
-                        sb.Append('\\', numBackslash * 2 + 1);
-                        sb.Append('"');
-                        idx++;
-                    }
-                    else
-                    {
-                        sb.Append('\\', numBackslash);
-                    }
-                    continue;
-                }
-
-                if (c == '"')
-                {
-                    sb.Append('\\').Append('"');
-                    continue;
-                }
-
-                sb.Append(c);
-            }
-            sb.Append('"');
-        }
     }
 }

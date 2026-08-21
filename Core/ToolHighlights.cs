@@ -408,6 +408,7 @@ namespace DevToolbox.Core
                 {
                     "Supports HMAC-MD5, HMAC-SHA1, HMAC-SHA256 and HMAC-SHA512",
                     "Outputs the HMAC as lowercase hexadecimal",
+                    "\"Generate Random Key\" fills Secret Key with a cryptographically random key sized for the selected algorithm - the same output format as `openssl rand -hex N`",
                 }),
 
             ["QR Code Generator"] = new ToolDoc(
@@ -525,6 +526,16 @@ namespace DevToolbox.Core
                     "Starts prefilled with an example payload including a live \"iat\" (issued-at) timestamp",
                     "Signs with HS256, HS384, or HS512 using a secret key you provide",
                     "Produces the standard three-part, dot-separated compact token",
+                    "\"Generate Random Key\" fills Secret Key with a cryptographically random key sized for the selected algorithm - the same output format as `openssl rand -hex N`",
+                }),
+
+            ["AES Encrypt / Decrypt"] = new ToolDoc(
+                "Encrypts text with a password using AES-256-GCM, or decrypts a previously-encrypted blob back to plain text with the same password.",
+                new[]
+                {
+                    "Output is a single self-contained Base64 string - a fresh random salt and nonce are embedded alongside the ciphertext, so there's nothing else to remember besides the password",
+                    "Uses authenticated encryption (AES-GCM): a wrong password or corrupted/tampered ciphertext fails with a clear error instead of silently producing garbage",
+                    "Encrypting the same text twice produces different output each time (fresh salt/nonce per run) - this is expected, not a bug",
                 }),
 
             ["Certificate Decoder"] = new ToolDoc(

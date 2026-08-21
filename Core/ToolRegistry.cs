@@ -1,3 +1,4 @@
+using DevToolbox.Tools.AesEncryption;
 using DevToolbox.Tools.Base32Encoder;
 using DevToolbox.Tools.Base64Encoder;
 using DevToolbox.Tools.CamlFormatter;
@@ -143,6 +144,7 @@ namespace DevToolbox.Core
                 new FileEncodingConverterTool(),
                 new MessageDigesterTool(),
                 new HmacGeneratorTool(),
+                new AesEncryptionTool(),
                 new JwtDecoderTool(),
                 new JwtEncoderTool(),
                 new CertificateDecoderTool(),

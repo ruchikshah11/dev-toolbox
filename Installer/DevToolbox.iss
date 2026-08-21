@@ -1,5 +1,5 @@
 #define MyAppName "DevToolbox"
-#define MyAppVersion "1.0.0"
+#define MyAppVersion "1.1.0"
 #define MyAppExeName "DevToolbox.exe"
 #define MyAppPublisher "Ruchik Shah"
 
@@ -29,9 +29,10 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription: "Additional shortcuts:"; Flags: unchecked
 
 [Files]
-; Costura.Fody already embeds every dependency into the exe, so this is the only file the
-; installer needs to carry - no loose DLLs to list.
-Source: "..\bin\Release\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
+; The SingleFile publish profile (dotnet publish -c Release -p:PublishProfile=SingleFile)
+; already bundles every dependency - and the .NET runtime itself, since it's self-contained -
+; into the exe, so this is the only file the installer needs to carry - no loose DLLs to list.
+Source: "..\bin\Publish\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"

@@ -25,7 +25,17 @@ namespace DevToolbox.UI
         public static void SuspendDrawing(Control control) =>
             SendMessage(control.Handle, WM_SETREDRAW, IntPtr.Zero, IntPtr.Zero);
 
-        public static void ResumeDrawing(Control control)
+        /// <summary>
+        /// Re-enables painting after SuspendDrawing and forces one immediate repaint.
+        /// <paramref name="recursive"/> controls whether that repaint also covers every child
+        /// control, not just the control's own surface - plain RichTextBox callers (no nested
+        /// children) don't need it, but MainForm's nav panel does: a plain, non-recursive
+        /// Invalidate() here was tried there first and left child Label/Panel controls (category
+        /// headers, tool rows) never told to repaint after a WM_SETREDRAW suspend/resume around a
+        /// Controls.Clear()+Add() churn - they'd stay blank or stale until some *unrelated* later
+        /// event happened to repaint them.
+        /// </summary>
+        public static void ResumeDrawing(Control control, bool recursive = false)
         {
             SendMessage(control.Handle, WM_SETREDRAW, new IntPtr(1), IntPtr.Zero);
 
@@ -35,7 +45,7 @@ namespace DevToolbox.UI
             // wrapped all along, while the on-screen window kept showing a stale, unwrapped
             // render. Update() forces that repaint to happen synchronously, right now, instead of
             // leaving the on-screen surface stale until something else happens to repaint it.
-            control.Invalidate();
+            control.Invalidate(recursive);
             control.Update();
         }
 

@@ -1,3 +1,4 @@
+using DevToolbox.Tools.HmacGenerator;
 using DevToolbox.UI;
 
 namespace DevToolbox.Tools.JwtEncoder
@@ -8,8 +9,22 @@ namespace DevToolbox.Tools.JwtEncoder
         private readonly TextBox _txtSecretKey = new();
         private readonly ComboBox _cboAlgorithm = new();
         private readonly Button _btnGenerate = new();
+        private readonly Button _btnGenerateKey = new();
         private readonly Label _lblError = new();
         private readonly TextBox _txtOutput = new();
+        private readonly ToolTip _toolTip = new();
+
+        // JWT's HS256/384/512 names don't match HmacGeneratorService.KeyByteLengthFor's
+        // "HMACSHA256"-style names, but the underlying ideal key size (matching the hash's own
+        // output size) is identical - reusing that same reasoning/table here rather than
+        // duplicating GenerateRandomKeyHex's CSPRNG logic in a second place.
+        private static int KeyByteLengthFor(string algorithm) => algorithm switch
+        {
+            "HS256" => 32,
+            "HS384" => 48,
+            "HS512" => 64,
+            _ => 32
+        };
 
         /// <summary>Builds the payload/secret cards and the signed-token output card.</summary>
         public JwtEncoderControl()
@@ -80,6 +95,15 @@ namespace DevToolbox.Tools.JwtEncoder
             _btnGenerate.Click += (_, _) => TryGenerate();
             card.Controls.Add(_btnGenerate);
 
+            _btnGenerateKey.Text = "Generate Random Key";
+            _btnGenerateKey.UseMnemonic = false;
+            _btnGenerateKey.Location = new Point(18 + _btnGenerate.Width + 10, 108);
+            _btnGenerateKey.Size = new Size(190, 32);
+            Theme.StyleSecondaryButton(_btnGenerateKey);
+            _btnGenerateKey.Click += (_, _) => GenerateRandomKey();
+            card.Controls.Add(_btnGenerateKey);
+            _toolTip.SetToolTip(_btnGenerateKey, "Fills Secret Key with a cryptographically random key, sized for the selected algorithm - the same output format as `openssl rand -hex N`.");
+
             _lblError.Location = new Point(18, 150);
             _lblError.Size = new Size(card.Width - 36, 30);
             _lblError.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
@@ -113,6 +137,14 @@ namespace DevToolbox.Tools.JwtEncoder
             _txtOutput.Font = Theme.MonoFont;
             CardPanel.WrapWithBorder(card, _txtOutput, new Point(18, 42), card.Width - 36, card.Height - 58,
                 AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Bottom);
+        }
+
+        /// <summary>Fills Secret Key with a fresh random key, sized to whichever algorithm is currently selected (32 random bytes -> 64 hex characters for HS256, matching `openssl rand -hex 32`).</summary>
+        private void GenerateRandomKey()
+        {
+            var algorithm = _cboAlgorithm.SelectedItem as string ?? JwtEncoderService.Algorithms[0];
+            var byteLength = KeyByteLengthFor(algorithm);
+            _txtSecretKey.Text = HmacGeneratorService.GenerateRandomKeyHex(byteLength);
         }
 
         /// <summary>Runs the encoder against the current inputs and shows the token or the error.</summary>

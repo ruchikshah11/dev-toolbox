@@ -219,23 +219,25 @@ namespace DevToolbox.UI
                 AutoSize = true
             };
 
+            // Icon-only, matching _btnSettings right next to it - a page/document glyph is
+            // recognizable enough on its own that the "Documentation" label was redundant weight
+            // in the header, and this keeps the two header buttons visually consistent with each
+            // other instead of one being a wide labeled button and the other a plain icon.
             _btnDocs = new Button
             {
-                Text = "Documentation",
-                // Wide enough for the full word at BoldFont plus the icon's left padding below -
-                // 136 was too tight and clipped the trailing "n" ("Documentatio").
-                Size = new Size(168, 30),
-                TextAlign = ContentAlignment.MiddleLeft,
-                // Left padding makes room for the icon drawn in the Paint handler below, so the
-                // left-aligned text starts right after it instead of overlapping.
-                Padding = new Padding(30, 0, 0, 0)
+                Size = new Size(36, 30),
+                FlatStyle = FlatStyle.Flat,
+                Cursor = Cursors.Hand,
+                BackColor = Theme.Card,
+                TabStop = false
             };
-            Theme.StyleSecondaryButton(_btnDocs);
-            _btnDocs.Paint += (_, e) => DrawDocumentIcon(e.Graphics, new Rectangle(10, 7, 16, 16), Theme.TextMuted);
+            _btnDocs.FlatAppearance.BorderSize = 0;
+            _btnDocs.FlatAppearance.MouseOverBackColor = Theme.AccentSoft;
+            _btnDocs.FlatAppearance.MouseDownBackColor = Theme.AccentSoft;
+            _btnDocs.Paint += (_, e) => DrawDocumentIcon(e.Graphics, new Rectangle(6, 3, 24, 24), Theme.TextMuted);
+            _navToolTip.SetToolTip(_btnDocs, "Documentation");
             _btnDocs.Click += (_, _) => new DocumentationForm().Show();
 
-            // Icon-only (no text) so it doesn't compete with the "Documentation" button for
-            // attention - a gear/sliders glyph is the universally recognized "Settings" affordance.
             _btnSettings = new Button
             {
                 Size = new Size(36, 30),
@@ -338,20 +340,35 @@ namespace DevToolbox.UI
 
         private void RebuildNavList(string filter)
         {
-            // Every category toggle clears and re-adds 60+ child controls one at a time - without
-            // suspending layout, each individual Controls.Add() below can trigger its own layout
-            // pass, so a screenshot taken mid-rebuild can catch a half-built nav (a category
-            // header with no items under it yet, stale leftover text) rather than the finished
-            // result. _navPanel is already a BufferedPanel (OptimizedDoubleBuffer +
-            // AllPaintingInWmPaint + UserPaint) for exactly this kind of swap-at-runtime flicker -
-            // layering the raw WM_SETREDRAW interop used elsewhere in this app (for plain
-            // RichTextBox rebuilds) on top of that custom-painted, already-buffered panel actively
-            // made things worse (a stale duplicate category header, tool rows with no text - the
-            // WM_SETREDRAW suspend windowed out the newly-added child controls' own initial paint,
-            // and the single non-recursive Invalidate() on resume didn't recover them), so it was
-            // removed. A plain recursive Invalidate(true) - forcing the panel and every child
-            // control layered on top of it to paint fresh - is the safe way to guarantee no stale
-            // pixels survive the rebuild without fighting the panel's own buffering.
+            // Every category toggle clears and re-adds 60+ child controls one at a time.
+            // SuspendLayout only defers *layout math* - it does nothing to stop the OS compositor
+            // from visually updating the window while individual child controls are being
+            // destroyed (Controls.Clear()) and recreated (each Controls.Add() one at a time) in
+            // between, so a frame grabbed mid-rebuild can catch (and this was confirmed live, via
+            // a frame-by-frame video capture) several category headers completely missing while
+            // their tool rows and the rest of the list already reflect the new state - a ~60ms
+            // flicker, not a persistent bug, but a real one. WM_SETREDRAW (suspended below via
+            // NativeMethods, the same interop this app already uses for flicker-free RichTextBox
+            // rebuilds) tells the OS to stop visually updating this window at all until told
+            // otherwise, which is the only way to guarantee no such intermediate frame is ever
+            // shown. A previous attempt at this combined WM_SETREDRAW with a *non-recursive*
+            // resume-invalidate (NativeMethods.ResumeDrawing's default), which left child
+            // Label/Panel controls never told to repaint afterward (a stale duplicate header, tool
+            // rows with no text) - ResumeDrawing(recursive: true) below is the fix for that half of
+            // it, not a reason to avoid WM_SETREDRAW altogether.
+            //
+            // Skipped entirely if the handle doesn't exist yet (the very first RebuildNavList call
+            // happens inside BuildUi(), before the form has ever been shown) - checking
+            // IsHandleCreated here (rather than just trying it) matters because reading the
+            // .Handle property, which SuspendDrawing/ResumeDrawing do via SendMessage, has the side
+            // effect of *forcing* handle creation if it doesn't exist yet; doing that before the
+            // panel is even parented could create it with the wrong parent temporarily. That first
+            // call also has nothing to fix (a freshly-built panel starts scrolled to the top
+            // already, with nothing stale to flicker), so skipping it there is a no-op, not a
+            // missed case.
+            var canSuspendRedraw = _navPanel.IsHandleCreated;
+            if (canSuspendRedraw) NativeMethods.SuspendDrawing(_navPanel);
+
             _navPanel.SuspendLayout();
             try
             {
@@ -380,30 +397,50 @@ namespace DevToolbox.UI
                 // recalculating AutoScrollMinSize from the new child controls before this line
                 // reads/writes the scroll position, so the assignment could silently clamp back
                 // toward the *previous* (larger) scrolled-down offset instead of actually landing
-                // on top - reproduced live as the reported bug (a category header rendered near the
+                // on top - reproduced live as a reported bug (a category header rendered near the
                 // bottom of the panel with the rest of the now-shorter content scrolled out of view
                 // above it). Forcing an explicit PerformLayout first, resetting both the
                 // AutoScrollPosition property *and* the underlying VerticalScroll value directly,
-                // and then repeating the same reset once more on the next message-loop iteration
-                // (by which point layout has unquestionably settled) covers this reliably.
+                // and then repeating the same reset once more (below) covers this reliably.
                 _navPanel.PerformLayout();
                 _navPanel.AutoScrollPosition = Point.Empty;
                 _navPanel.VerticalScroll.Value = _navPanel.VerticalScroll.Minimum;
-                _navPanel.Invalidate(true);
-                _navPanel.Update();
 
-                // BeginInvoke requires a real window handle - the very first RebuildNavList call
-                // happens inside BuildUi(), before the form (and _navPanel) has ever been shown,
-                // so there's no handle yet and this would throw. That first call also has nothing
-                // to fix (a freshly-built panel starts scrolled to the top already), so skipping it
-                // there is a no-op, not a missed case.
-                if (_navPanel.IsHandleCreated)
+                if (canSuspendRedraw)
                 {
-                    _navPanel.BeginInvoke(new Action(() =>
+                    NativeMethods.ResumeDrawing(_navPanel, recursive: true);
+                }
+                else
+                {
+                    _navPanel.Invalidate(true);
+                    _navPanel.Update();
+                }
+
+                if (canSuspendRedraw)
+                {
+                    void ResetScroll()
                     {
                         _navPanel.AutoScrollPosition = Point.Empty;
                         _navPanel.VerticalScroll.Value = _navPanel.VerticalScroll.Minimum;
-                    }));
+                    }
+
+                    // Belt-and-suspenders: this bug came back after the migration to net10.0-windows
+                    // even with the BeginInvoke pass below already in place - modern .NET's
+                    // WinForms sometimes needs more than one message-loop iteration to finish
+                    // settling AutoScrollMinSize after a Controls.Clear()+Add() churn like this one,
+                    // so a single "wait one tick" BeginInvoke isn't watertight on its own. Reacting
+                    // to the panel's own Layout event - which fires precisely when WinForms has just
+                    // recalculated layout, AutoScrollMinSize included, rather than guessing how many
+                    // ticks that takes - is the timing-independent version of the same fix. One-shot
+                    // (unsubscribes itself) so it doesn't fight a deliberate user scroll afterwards.
+                    void ResetOnNextLayout(object? s, LayoutEventArgs e)
+                    {
+                        _navPanel.Layout -= ResetOnNextLayout;
+                        ResetScroll();
+                    }
+                    _navPanel.Layout += ResetOnNextLayout;
+
+                    _navPanel.BeginInvoke(new Action(ResetScroll));
                 }
             }
         }

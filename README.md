@@ -19,7 +19,7 @@ result live or via a button, copy it back out.
 | Converters | XSD Generator, XSLT Transformer, XML/JSON/CSV/YAML conversions, Epoch Timestamp, **Timezone Converter**, Color Converter/Picker, **Number Base Converter** |
 | PDF Tools | PDF Password Remover, Word to PDF, PDF to Word, PDF to Markdown, **Merge PDFs**, **Split PDF**, **Rotate PDF Pages**, **Add Page Numbers**, **Add/Remove Watermark**, **Protect PDF (Add Password)**, **Compress PDF** |
 | Code Runner | Runs code with a locally-installed PowerShell, Python, Node.js, cmd.exe, Java, R, or GCC/G++ (C/C++) toolchain, or opens HTML in your browser - no bundled compiler/runtime |
-| Encoders / Cryptography | URL, Base64, **Base32**, file encoding conversion, Message Digester (MD5/SHA-256/SHA-512), HMAC Generator, JWT Decoder/**Encoder**, **Certificate Decoder**, QR Code, GUID, Password Generator, **Compress Image** |
+| Encoders / Cryptography | URL, Base64, **Base32**, file encoding conversion, Message Digester (MD5/SHA-256/SHA-512), HMAC Generator, JWT Decoder/**Encoder**, **AES Encrypt/Decrypt**, **Certificate Decoder**, QR Code, GUID, Password Generator, **Compress Image** |
 | Code Minifiers / Beautifier | JS and CSS |
 | String Escaper & Utilities | String Utilities (case conversion incl. camelCase/PascalCase/snake_case/kebab-case/**URL Slug**, stats, etc.), HTML/XML/Java/.NET/JavaScript/JSON/CSV/SQL escaping, Diff Viewer |
 | Web Resources | Lorem Ipsum, HTML Viewer, Markdown Previewer, MIME Types, HTML Entities, URL Parser, I18N/Locale Codes, HTTP Status Codes |
@@ -68,33 +68,67 @@ this README staying in sync with every future addition.
 Two ways to get it onto a machine:
 
 - **Just the exe**: download `DevToolbox.exe` and run it - that's the whole distribution. Every
-  dependency (Newtonsoft.Json, YamlDotNet, NUglify, QRCoder, HtmlAgilityPack, Markdig) is
-  embedded in the exe itself via Costura.Fody, so there are no DLLs to ship alongside it and
-  nothing to install.
+  dependency is bundled into that one file via modern .NET's self-contained single-file publish
+  (see "Building from source" below), so there are no DLLs to ship alongside it and nothing to
+  install (not even the .NET runtime).
 - **Installer**: hand out `DevToolboxSetup.exe` instead (see "Building an installer" below) for
   a Start Menu shortcut, an optional desktop icon, and a proper uninstaller listed in Windows'
   Add/Remove Programs. It's a per-user install - no admin rights or UAC prompt needed.
 
 ## Building from source
 
-Requires the .NET SDK (targets classic .NET Framework 4.7.2, built via the modern SDK-style
-tooling).
+Requires the .NET SDK (targets `net10.0-windows`).
+
+A plain build (day-to-day development, F5 in Visual Studio) produces the usual multi-file
+output - `bin\Debug\DevToolbox.exe` plus its DLLs side by side:
 
 ```
 dotnet build -c Release
 ```
 
-Output: `bin\Release\DevToolbox.exe` - self-contained, single file.
+To produce the single portable exe described above (the one actually meant for handing out),
+publish with the `SingleFile` profile instead:
+
+```
+dotnet publish -c Release -p:PublishProfile=SingleFile
+```
+
+Output: `bin\Publish\DevToolbox.exe` - self-contained (bundles its own .NET runtime, so it runs
+on a machine without .NET installed), single file. The profile lives at
+`Properties\PublishProfiles\SingleFile.pubxml` - deliberately kept out of the main csproj's
+properties, since a `RuntimeIdentifier` there would also change every ordinary
+`dotnet build`/F5-debug output path and layout, not just publish.
 
 ## Building an installer
 
 `Installer\DevToolbox.iss` is an [Inno Setup](https://jrsoftware.org/isinfo.php) script that
-wraps the Release exe into `DevToolboxSetup.exe` - a real installer with a Start Menu shortcut,
-an optional desktop icon (unchecked by default), and an uninstaller, installed per-user under
-`%LocalAppData%\Programs\DevToolbox` (no admin rights required).
+wraps the published Release exe into `DevToolboxSetup.exe` - a real installer with a Start Menu
+shortcut, an optional desktop icon (unchecked by default), and an uninstaller, installed per-user
+under `%LocalAppData%\Programs\DevToolbox` (no admin rights required).
 
-1. `dotnet build -c Release` first, so `bin\Release\DevToolbox.exe` is up to date.
-2. Install Inno Setup if it isn't already (`winget install JRSoftware.InnoSetup`).
+**One command** (publishes, then compiles the installer):
+
+```
+Installer\build-release.ps1 -Version 1.1.0
+```
+
+Omit `-Version` to rebuild the same version already in the `.iss` file (e.g. after a last-minute
+source fix that shouldn't bump the release number). Requires Inno Setup
+(`winget install JRSoftware.InnoSetup` if it isn't already installed) - the script looks for
+`ISCC.exe` in both of its usual install locations automatically.
+
+Output: `Installer\Output\DevToolboxSetup.exe`.
+
+`AppId` in the `.iss` file is a fixed GUID, so re-running a newer installer upgrades an existing
+install in place rather than creating a duplicate Add/Remove Programs entry - `build-release.ps1`
+only ever touches `MyAppVersion`, never that GUID.
+
+<details>
+<summary>Manual steps (what the script above does)</summary>
+
+1. `dotnet publish -c Release -p:PublishProfile=SingleFile`, so `bin\Publish\DevToolbox.exe` is
+   up to date.
+2. Bump `MyAppVersion` at the top of `Installer\DevToolbox.iss`.
 3. Compile the script:
    ```
    ISCC.exe Installer\DevToolbox.iss
@@ -103,12 +137,7 @@ an optional desktop icon (unchecked by default), and an uninstaller, installed p
    `%LocalAppData%\Programs\Inno Setup 6\ISCC.exe` or
    `C:\Program Files (x86)\Inno Setup 6\ISCC.exe` - or open the `.iss` file in the Inno Setup IDE
    and press Compile.)
-
-Output: `Installer\Output\DevToolboxSetup.exe`.
-
-Bump `MyAppVersion` at the top of the `.iss` file before cutting a new installer - `AppId` is a
-fixed GUID so re-running a newer installer upgrades an existing install in place rather than
-creating a duplicate Add/Remove Programs entry.
+</details>
 
 ## Project structure
 
@@ -144,10 +173,15 @@ Program.cs  Entry point
 
 ## Why these specific technical choices
 
-- **.NET Framework 4.7.2, not .NET 8**: keeps the WinForms/Costura.Fody single-exe packaging
-  approach working exactly as it does across this project's sibling tools.
-- **Costura.Fody** embeds every dependency DLL into `DevToolbox.exe` as a resource (unpacked at
-  runtime), so distribution is a single exe file.
+- **`net10.0-windows`, migrated from .NET Framework 4.7.2**: this app originally targeted classic
+  .NET Framework 4.7.2 for its WinForms/Costura.Fody single-exe packaging; it's since moved to
+  modern .NET, which supports WinForms directly and has its own native single-file publish (see
+  "Building from source" above), so Costura.Fody is no longer needed at all.
+- **Single-file publish is a `dotnet publish` concern, not baked into the main csproj**: the
+  `RuntimeIdentifier`/`SelfContained`/`PublishSingleFile` properties live in
+  `Properties\PublishProfiles\SingleFile.pubxml` instead of the project's main `PropertyGroup` -
+  putting them there would change every ordinary `dotnet build`/F5-debug output path and layout
+  too, not just publish, which isn't wanted for day-to-day development.
 - **App-level preferences (dark mode, pinned tools, last-opened tool, remember-last-tool,
   default landing tool) live in one shared `AppSettings` instance**, persisted to
   `%LocalAppData%\DevToolbox\settings.json`. `AppSettings.Load()` caches a single object rather
@@ -166,18 +200,22 @@ Program.cs  Entry point
   just to track the cursor outside the app's own window.
 - **HTML Viewer / Markdown Previewer use the legacy `WebBrowser` control, not WebView2**: WebView2
   was tried (it's Chromium-based and properly DPI-aware) but its native `WebView2Loader.dll`
-  couldn't be made to travel inside the single portable exe via Costura, so it was reverted.
+  couldn't be made to travel inside the single portable exe, so it was reverted (originally a
+  Costura limitation; still true under modern .NET's single-file publish, which also doesn't
+  extract arbitrary native loader DLLs next to the exe for a WebView2-style control to find).
   Tradeoff: wide preview content can occasionally run past the pane's edge under certain DPI
   scaling, since `WebBrowser` (IE/Trident) isn't itself per-monitor DPI aware.
-- **`DpiAwareness=System` (not `PerMonitorV2`) in `App.config`**: fixes blurry/misread UI text on
-  scaled displays (the original bug) without the `WebBrowser` control desyncing its layout width
-  from its container, which is what `PerMonitorV2` caused.
+- **`Application.SetHighDpiMode(HighDpiMode.SystemAware)` in `Program.cs`** (not `PerMonitorV2`,
+  and not `App.config` - the classic .NET Framework `DpiAwareness` App.config setting this
+  replaced isn't read on modern .NET): fixes blurry/misread UI text on scaled displays (the
+  original bug) without the `WebBrowser` control desyncing its layout width from its container,
+  which is what `PerMonitorV2` caused.
 - **System theme detection reads the registry directly**
   (`HKCU\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize\AppsUseLightTheme`) rather
-  than a public WinForms API, since .NET Framework 4.7.2 has no built-in accessor for Windows'
-  light/dark app-theme setting. Read once when System mode is (re-)selected, not watched live -
-  changing your Windows theme while the app is already running won't flip it until you reopen
-  Settings or restart the app.
+  than a public WinForms API, since WinForms (Framework or modern .NET alike) has no built-in
+  accessor for Windows' light/dark app-theme setting. Read once when System mode is (re-)selected,
+  not watched live - changing your Windows theme while the app is already running won't flip it
+  until you reopen Settings or restart the app.
 - **Code Runner shells out to locally-installed interpreters/compilers rather than bundling a
   scripting engine**: it runs PowerShell (`pwsh.exe`, falling back to Windows PowerShell),
   Python, Node.js, cmd.exe/Batch, Java (JDK 11+'s single-file source-launcher, no separate
@@ -185,7 +223,7 @@ Program.cs  Entry point
   since it needs a Visual Studio developer environment rather than a plain PATH executable) -
   whichever of those it can actually find on this machine, with no sandboxing. C/C++ compile
   first (their own captured build output and timeout) and only run the resulting `.exe` if that
-  succeeds; HTML just opens in your default browser instead of being executed as a process.
-  Every run is killed if it exceeds its configurable timeout - but .NET Framework 4.7.2's
-  `Process.Kill()` has no "kill entire process tree" option (added later, in .NET Core 3.0+), so
-  a timed-out script that spawned its own child processes can leave those still running.
+  succeeds; HTML just opens in your default browser instead of being executed as a process. Every
+  run that exceeds its configurable timeout is killed via `Process.Kill(entireProcessTree: true)`
+  (available on modern .NET; the .NET Framework 4.7.2 this app originally targeted only had the
+  parameterless `Kill()`, which could leave a timed-out script's own child processes running).
